@@ -1,5 +1,5 @@
 # ping_catcher
-ping_catcher is a simple programs wich will listen for ping on your computer
+ping_catcher is a simple program wich will listen for ping on your computer
 
 To run it you'll need [cargo](https://github.com/rust-lang/cargo/), the rust package manager. Then :
 ```
