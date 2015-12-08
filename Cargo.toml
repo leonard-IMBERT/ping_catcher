@@ -7,3 +7,4 @@ author=["Leonard Imbert <imbert418@gmail.com>"]
 socket = "0.0.7"
 libc = "0.1.10"
 time = "0.1"
+nom = "~1.0.0"
