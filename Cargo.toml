@@ -1,6 +1,6 @@
 [package]
 name="ping_catch"
-version="0.0.1"
+version="0.1.0"
 author=["Leonard Imbert <imbert418@gmail.com>"]
 
 [dependencies]
