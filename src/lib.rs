@@ -29,7 +29,7 @@ struct IcmpMessage{
 
 impl fmt::Display for IcmpMessage {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        return write!(f, "type: {}\ncode: {}\nchecksum: {}\nheader: {}\ndata: {} {} {} {}",
+        return write!(f, "type: {}\ncode: {}\nchecksum: {}\nheader: {}\ndata: {} {} {} {}\n{:?}\n{:?}\n",
                self.icmp_type,
                self.icmp_code,
                self.checksum,
@@ -37,7 +37,9 @@ impl fmt::Display for IcmpMessage {
                self.data.0,
                self.data.1,
                self.data.2,
-               self.data.3);
+               self.data.3,
+               self.optional_data.0,
+               self.optional_data.1);
     }
 }
 
@@ -206,13 +208,11 @@ pub fn listen_during<'a>(container: &'a mut [u8], sock: &Socket) -> io::Result<&
     try!(sock.setsockopt(SOL_SOCKET, SO_RCVTIMEO, compute_timeout(Duration::seconds(3))));
     match sock.recvfrom_into(container, 0) {
         Err(err) => {
-            println!("{}", err);
             return Err(err);
         },
         Ok((s,d)) => {
-            println!("{}", "Got ping");
-            println!("{:?}", d);
-            println!("{}", s);
+            println!("Got ping:");
+            println!("Sender: {}", s);
             return Ok(container);
         }
     }

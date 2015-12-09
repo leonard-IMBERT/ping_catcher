@@ -1,6 +1,6 @@
 [root]
 name = "ping_catch"
-version = "0.0.1"
+version = "0.1.0"
 dependencies = [
  "libc 0.1.12 (registry+https://github.com/rust-lang/crates.io-index)",
  "nom 1.0.1 (registry+https://github.com/rust-lang/crates.io-index)",
