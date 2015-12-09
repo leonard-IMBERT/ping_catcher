@@ -110,9 +110,9 @@ fn u8_to_u32(table: &[u8]) -> Option<u32> {
     match (first_op, secon_op, third_op, fourt_op) {
         (Some(fir), Some(sec), Some(thi), Some(fou)) => {
             return Some(
-                fir << (3 * 8) +
-                sec << (2 * 8) +
-                thi << 8 +
+                (fir << (3 * 8)) +
+                (sec << (2 * 8)) +
+                (thi << 8) +
                 fou);
         },
         _ => None,
