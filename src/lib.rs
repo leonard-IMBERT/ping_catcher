@@ -91,7 +91,7 @@ fn u8_to_u16(table: &[u8]) -> Option<u16> {
     let left_op = map_option(iter.next(), as_u16);
     let right_op = map_option(iter.next(), as_u16);
     match (left_op, right_op) {
-        (Some(left), Some(right)) => return Some(left << 8 +right),
+        (Some(left), Some(right)) => return Some((left << 8) +right),
         _ => return None,
     }
 }
