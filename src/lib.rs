@@ -16,30 +16,137 @@ use nom::{IResult, Needed};
 
 const IPPROTO_ICMP: i32 = 1;
 
-type Word32 = (u8,u8,u8,u8);
+struct Word32 {
+    al: u8,
+    be: u8,
+    ga: u8,
+    de: u8
+}
+
+trait IPv4Message {
+    fn get_version(&self) -> u8;
+    fn get_ihl(&self) -> u8;
+    fn get_dscp(&self) -> u8;
+    fn get_ecn(&self) -> u8;
+    fn get_length(&self) -> u16;
+    fn get_identification(&self) -> u16;
+    fn get_flags(&self) -> u8;
+    fn get_offset(&self) -> u16;
+    fn get_ttl(&self) -> u8;
+    fn get_protocol(&self) -> u8;
+    fn get_checksum(&self) -> u16;
+    fn get_source_ip(&self) -> Word32;
+    fn get_destination_ip(&self) -> Word32;
+    fn get_option(&self) -> Option<Word32>;
+}
+
+impl IPv4Message for [u8; 24] {
+    fn get_version(&self) -> u8 {
+        return self[0] >> 4;
+    }
+    fn get_ihl(&self) -> u8 {
+        return (self[0] << 4) >> 4;
+    }
+    fn get_dscp(&self) -> u8 {
+        return self[1] >> 2;
+    }
+    fn get_ecn(&self) -> u8 {
+        return (self[1] << 6) >> 6;
+    }
+    fn get_length(&self) -> u16 {
+        return ((self[2] as u16) << 8) + self[3] as u16;
+    }
+    fn get_identification(&self) -> u16 {
+        return ((self[4] as u16) << 8) + self[5] as u16;
+    }
+    fn get_flags(&self) -> u8 {
+        return self[6] >> 5;
+    }
+    fn get_offset(&self) -> u16 {
+        return ((((self[6] << 3) >> 3) as u16) << 8) + self[7] as u16;
+    }
+    fn get_ttl(&self) -> u8 {
+        return self[8];
+    }
+    fn get_protocol(&self) -> u8 {
+        return self[9];
+    }
+    fn get_checksum(&self) -> u16 {
+        return ((self[10] as u16) << 8) + self[11] as u16;
+    }
+    fn get_source_ip(&self) -> Word32 {
+        return Word32 {
+            al: self[12],
+            be: self[13],
+            ga: self[14],
+            de: self[15]
+        };
+    }
+    fn get_destination_ip(&self) -> Word32 {
+        return Word32 {
+            al: self[16],
+            be: self[17],
+            ga: self[18],
+            de: self[19]
+        };
+    }
+    fn get_option(&self) -> Option<Word32> {
+        if self.get_ihl() <= 5 {
+            return None;
+        } else {
+            return Some(Word32 {
+                al: self[20],
+                be: self[21],
+                ga: self[22],
+                de: self[23]
+            })
+        }
+    }
+}
+
+struct Message {
+    header: [u8; 24],
+    body: IcmpMessage
+}
 
 struct IcmpMessage{
     icmp_type: u8,
     icmp_code: u8,
     checksum: u16,
-    header_content: u32,
-    data: Word32,
-    optional_data: (Option<Word32>, Option<Word32>),
+    header_content: Word32,
+    data1: Word32,
+    data2: Word32,
+    data3: Word32,
+}
+
+impl fmt::Display for Word32 {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        return write!(f,"{} {} {} {}", self.al, self.be, self.ga, self.de);
+    }
 }
 
 impl fmt::Display for IcmpMessage {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        return write!(f, "type: {}\ncode: {}\nchecksum: {}\nheader: {}\ndata: {} {} {} {}\n{:?}\n{:?}\n",
+        return write!(f, "type: {}\ncode: {}\nchecksum: {}\nheader: {}\ndata:\n{}\n{}\n{}\n",
                self.icmp_type,
                self.icmp_code,
                self.checksum,
                self.header_content,
-               self.data.0,
-               self.data.1,
-               self.data.2,
-               self.data.3,
-               self.optional_data.0,
-               self.optional_data.1);
+               self.data1,
+               self.data2,
+               self.data3);
+    }
+}
+
+impl fmt::Display for Message {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        return write!(f, "Version: {}\nId: {}\nSource: {}\nDestination: {}\nBody:\n{}",
+                      self.header.get_version(),
+                      self.header.get_identification(),
+                      self.header.get_source_ip(),
+                      self.header.get_destination_ip(),
+                      self.body
+                      );
     }
 }
 
@@ -51,13 +158,18 @@ fn u8_to_word32(u: &[u8]) -> Option<Word32> {
             th: take!(8)    ~
             fo: take!(8)    ,
             || {match (u8_to_u8(fi), u8_to_u8(se), u8_to_u8(th), u8_to_u8(fo)){
-                (Some(a), Some(b), Some(c), Some(d)) => Some((a, b, c, d)),
+                (Some(a), Some(b), Some(c), Some(d)) => Some(Word32 {
+                    al: a,
+                    be: b,
+                    ga: c,
+                    de: d
+                }),
                 _ => None,
             }}
             ));
     return match scribe(u){
-        IResult::Done(input, output) => output,
-        IResult::Error(err) => {
+        IResult::Done(_, output) => output,
+        IResult::Error(_) => {
             println!("Error when parsing");
             return None;
         },
@@ -96,103 +208,87 @@ fn u8_to_u16(table: &[u8]) -> Option<u16> {
     }
 }
 
-fn u8_to_u32(table: &[u8]) -> Option<u32> {
-    let mut iter = table.iter();
-
-    fn as_u32(ei: &u8) -> u32 {
-        let &si = ei;
-        return si as u32;
-    }
-
-    let first_op = map_option(iter.next(), as_u32);
-    let secon_op = map_option(iter.next(), as_u32);
-    let third_op = map_option(iter.next(), as_u32);
-    let fourt_op = map_option(iter.next(), as_u32);
-
-    match (first_op, secon_op, third_op, fourt_op) {
-        (Some(fir), Some(sec), Some(thi), Some(fou)) => {
-            return Some(
-                (fir << (3 * 8)) +
-                (sec << (2 * 8)) +
-                (thi << 8) +
-                fou);
-        },
-        _ => None,
-    }
-}
-
-fn map_option<A,B>(opt: Option<A>, f: fn(A) -> B) -> Option<B> {
+fn map_option<A,B,F>(opt: Option<A>, f: F) -> Option<B> where F: Fn(A) -> B {
     match opt {
         Some(a) => Some(f(a)),
         None => None,
     }
 }
 
-fn flatmap_option<A,B>(opt: Option<A>, f: fn(A) -> Option<B>) -> Option<B> {
-    match opt {
-        Some(a) => f(a),
-        None => None,
-    }
-}
+fn convert_data(data: &mut[u8]) -> Option<Message> {
+    named!(
+        converter(&[u8]) -> Option<IcmpMessage>,
+        chain!(
+            icmp_t: take!(8)            ~
+            icmp_c: take!(8)            ~
+            checks: take!(16)           ~
+            header_cont: take!(32)      ~
+            body1: take!(32)            ~
+            body2: take!(32)            ~
+            body3: take!(32)            ,
+            || {match(
+                    u8_to_u8(icmp_t),
+                    u8_to_u8(icmp_c),
+                    u8_to_u16(checks),
+                    u8_to_word32(header_cont),
+                    u8_to_word32(body1),
+                    u8_to_word32(body2),
+                    u8_to_word32(body3),
+                ){(
+                    Some(ty),
+                    Some(co),
+                    Some(ch),
+                    Some(he),
+                    Some(b1),
+                    Some(b2),
+                    Some(b3)
+                ) => Some(IcmpMessage{
+                    icmp_type:          ty,
+                    icmp_code:          co,
+                    checksum:           ch,
+                    header_content:     he,
+                    data1:              b1,
+                    data2:              b2,
+                    data3:              b3,
+                }),
+                _ => None,
+            }}
+    ));
 
-fn convert_data(data: &mut[u8]) -> Option<IcmpMessage> {
-    named!(converter(&[u8]) -> Option<IcmpMessage>,
-    chain!(
-        icmp_t: take!(8)            ~
-        icmp_c: take!(8)            ~
-        checks: take!(16)           ~
-        header_cont: take!(32)      ~
-        body: take!(32)             ~
-        body1_opt: opt!(take!(32))  ~
-        body2_opt: opt!(take!(32))  ,
-        || {match (
-                u8_to_u8(icmp_t),
-                u8_to_u8(icmp_c),
-                u8_to_u16(checks),
-                u8_to_u32(header_cont),
-                u8_to_word32(body),
-                ) {
-            (Some(ty), Some(co), Some(ch), Some(he), Some(bo)) => Some(IcmpMessage {
-                icmp_type:          ty,
-                icmp_code:          co,
-                checksum:           ch,
-                header_content:     he,
-                data:               bo,
-                optional_data: (
-                    flatmap_option(body1_opt, u8_to_word32),
-                    flatmap_option(body2_opt, u8_to_word32),
-                    )
+    let mut header: [u8; 24] = [0;24];
+    for i in 0..23 {
+        header[i] = data[i];
+    }
+    if header.get_ihl() > 5 {
+        return match converter(&data[24..]){
+            IResult::Done(_, output) => map_option(output,|out| Message {
+                header: header,
+                body: out,
             }),
-            _ => None,
-        }}
-    )
-        );
-    return match converter(data){
-        IResult::Done(input, output) => output,
-        IResult::Error(err) => {
-            println!("Error when parsing");
-            return None;
-        },
-        IResult::Incomplete(need) => {
-            match need {
-                Needed::Unknown => println!("Fuuuuuu"),
-                Needed::Size(si) => {
-                    print!("input: ");
-                    println!("{:?}", data);
-                    println!(", Missing: {}", si);
-                }
-            }
-            return None;
+            IResult::Error(_) => None,
+            IResult::Incomplete(_) => None,
+        }
+    } else {
+        return match converter(&data[20..]){
+            IResult::Done(_, output) => map_option(output,|out| Message {
+                header: header,
+                body: out,
+            }),
+            IResult::Error(_) => None,
+            IResult::Incomplete(_) => None,
         }
     };
+
+    ;
+
 }
 
 pub fn listen(dur: Duration) -> io::Result<bool> {
-    let mut dataEmpt: [u8; 4096] = [0; 4096];
+    let mut data_empt: [u8; 4096] = [0; 4096];
     let begin = time::get_time();
     let sock = try!(Socket::new(AF_INET, SOCK_RAW, IPPROTO_ICMP));
     while time::get_time() < begin + dur {
-        match listen_during(&mut dataEmpt[..], &sock) {
+        match listen_during(&mut data_empt[..], &sock) {
             Ok(data) => match convert_data(data) {
                 Some(d) => println!("{}", d),
                 None => println!("Error during parsing\n"),
@@ -210,9 +306,7 @@ pub fn listen_during<'a>(container: &'a mut [u8], sock: &Socket) -> io::Result<&
         Err(err) => {
             return Err(err);
         },
-        Ok((s,d)) => {
-            println!("Got ping:");
-            println!("Sender: {}", s);
+        Ok((s,_)) => {
             return Ok(container);
         }
     }
@@ -220,7 +314,7 @@ pub fn listen_during<'a>(container: &'a mut [u8], sock: &Socket) -> io::Result<&
 
 fn compute_timeout(timeout: Duration) -> timeval {
     let usecs = timeout.num_microseconds().unwrap();
-    timeval{ 
+    timeval{
         tv_sec: (usecs / 1000000) as time_t,
         tv_usec: (usecs % 1000000) as suseconds_t,
     }

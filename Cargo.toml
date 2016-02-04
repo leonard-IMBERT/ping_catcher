@@ -5,6 +5,6 @@ author=["Leonard Imbert <imbert418@gmail.com>"]
 
 [dependencies]
 socket = "0.0.7"
-libc = "0.1.10"
+libc = "0.2"
 time = "0.1"
 nom = "~1.0.0"
