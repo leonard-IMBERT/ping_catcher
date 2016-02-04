@@ -10,6 +10,7 @@ use socket::{AF_INET, IP_TTL, IPPROTO_IP, SOCK_RAW, SOL_SOCKET, Socket};
 use libc::{SO_RCVTIMEO, timeval, time_t, suseconds_t};
 
 use std::io;
+use std::io::Write;
 use std::fmt;
 
 use nom::{IResult, Needed};
@@ -256,31 +257,31 @@ fn convert_data(data: &mut[u8]) -> Option<Message> {
     ));
 
     let mut header: [u8; 24] = [0;24];
-    for i in 0..23 {
-        header[i] = data[i];
+    let result = (&mut header[..]).write(&data[..23]);
+    return match result {
+        Ok(_) => {
+            if header.get_ihl() > 5 {
+                return match converter(&data[24..]){
+                    IResult::Done(_, output) => map_option(output,|out| Message {
+                        header: header,
+                        body: out,
+                    }),
+                    IResult::Error(_) => None,
+                    IResult::Incomplete(_) => None,
+                }
+            } else {
+                return match converter(&data[20..]){
+                    IResult::Done(_, output) => map_option(output,|out| Message {
+                        header: header,
+                        body: out,
+                    }),
+                    IResult::Error(_) => None,
+                    IResult::Incomplete(_) => None,
+                }
+            };
+        },
+        Err(_) => None
     }
-    if header.get_ihl() > 5 {
-        return match converter(&data[24..]){
-            IResult::Done(_, output) => map_option(output,|out| Message {
-                header: header,
-                body: out,
-            }),
-            IResult::Error(_) => None,
-            IResult::Incomplete(_) => None,
-        }
-    } else {
-        return match converter(&data[20..]){
-            IResult::Done(_, output) => map_option(output,|out| Message {
-                header: header,
-                body: out,
-            }),
-            IResult::Error(_) => None,
-            IResult::Incomplete(_) => None,
-        }
-    };
-
-    ;
-
 }
 
 pub fn listen(dur: Duration) -> io::Result<bool> {
@@ -306,7 +307,7 @@ pub fn listen_during<'a>(container: &'a mut [u8], sock: &Socket) -> io::Result<&
         Err(err) => {
             return Err(err);
         },
-        Ok((s,_)) => {
+        Ok((_,_)) => {
             return Ok(container);
         }
     }
