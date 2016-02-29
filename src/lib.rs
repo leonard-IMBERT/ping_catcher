@@ -232,12 +232,12 @@ fn convert_data(data: &mut[u8]) -> Option<Message> {
     }
 }
 
-pub fn listen(dur: Duration) -> io::Result<bool> {
+pub fn listen_during(dur: Duration) -> io::Result<bool> {
     let mut data_empt: [u8; 4096] = [0; 4096];
     let begin = time::get_time();
     let sock = try!(Socket::new(AF_INET, SOCK_RAW, IPPROTO_ICMP));
     while time::get_time() < begin + dur {
-        match listen_during(&mut data_empt[..], &sock) {
+        match listen(&mut data_empt[..], &sock) {
             Ok(data) => match convert_data(data) {
                 Some(d) => println!("{}", d),
                 None => println!("Error during parsing\n"),
@@ -248,7 +248,7 @@ pub fn listen(dur: Duration) -> io::Result<bool> {
     return Ok(true);
 }
 
-pub fn listen_during<'a>(container: &'a mut [u8], sock: &Socket) -> io::Result<&'a mut [u8]> {
+pub fn listen<'a>(container: &'a mut [u8], sock: &Socket) -> io::Result<&'a mut [u8]> {
     try!(sock.setsockopt(IPPROTO_IP, IP_TTL, 255));
     try!(sock.setsockopt(SOL_SOCKET, SO_RCVTIMEO, compute_timeout(Duration::seconds(3))));
     match sock.recvfrom_into(container, 0) {
