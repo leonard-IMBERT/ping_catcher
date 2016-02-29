@@ -17,78 +17,53 @@ use nom::{IResult, Needed};
 
 const IPPROTO_ICMP: i32 = 1;
 
-trait IPv4Message {
-    fn get_version(&self) -> u8;
-    fn get_ihl(&self) -> u8;
-    fn get_dscp(&self) -> u8;
-    fn get_ecn(&self) -> u8;
-    fn get_length(&self) -> u16;
-    fn get_identification(&self) -> u16;
-    fn get_flags(&self) -> u8;
-    fn get_offset(&self) -> u16;
-    fn get_ttl(&self) -> u8;
-    fn get_protocol(&self) -> u8;
-    fn get_checksum(&self) -> u16;
-    fn get_source_ip(&self) -> [u8; 4];
-    fn get_destination_ip(&self) -> [u8; 4];
-    fn get_option(&self) -> Option<[u8; 4]>;
-}
-
-impl IPv4Message for [u8; 24] {
-    fn get_version(&self) -> u8 {
-        return self[0] >> 4;
-    }
-    fn get_ihl(&self) -> u8 {
-        return (self[0] << 4) >> 4;
-    }
-    fn get_dscp(&self) -> u8 {
-        return self[1] >> 2;
-    }
-    fn get_ecn(&self) -> u8 {
-        return (self[1] << 6) >> 6;
-    }
-    fn get_length(&self) -> u16 {
-        return ((self[2] as u16) << 8) + self[3] as u16;
-    }
-    fn get_identification(&self) -> u16 {
-        return ((self[4] as u16) << 8) + self[5] as u16;
-    }
-    fn get_flags(&self) -> u8 {
-        return self[6] >> 5;
-    }
-    fn get_offset(&self) -> u16 {
-        return ((((self[6] << 3) >> 3) as u16) << 8) + self[7] as u16;
-    }
-    fn get_ttl(&self) -> u8 {
-        return self[8];
-    }
-    fn get_protocol(&self) -> u8 {
-        return self[9];
-    }
-    fn get_checksum(&self) -> u16 {
-        return ((self[10] as u16) << 8) + self[11] as u16;
-    }
-    fn get_source_ip(&self) -> [u8; 4] {
-        return [self[12], self[13], self[14], self[15]]
-    }
-    fn get_destination_ip(&self) -> [u8; 4] {
-        return [self[16], self[17], self[18], self[19]]
-    }
-    fn get_option(&self) -> Option<[u8; 4]> {
-        if self.get_ihl() <= 5 {
-            return None;
-        } else {
-            return Some([self[20], self[21], self[22], self[23]])
-        }
+fn slice_to_ipv4_header(&slice: &[u8; 24]) -> IPv4Header {
+    let options = if ((slice[0] << 4) >> 4) < 6 {
+        None
+    } else {
+        Some([slice[20], slice[21], slice[22], slice[23]])
+    };
+    return IPv4Header {
+        version:    slice[0] >> 4,
+        ihl:        (slice[0] << 4) >> 4,
+        dscp:       slice[1] >> 2,
+        ecn:        (slice[1] << 6) >> 6,
+        length:     ((slice[2] as u16) << 8) + slice[3] as u16,
+        id:         ((slice[4] as u16) << 8) + slice[5] as u16,
+        flags:      slice[6] >> 5,
+        offset:     ((((slice[6] << 3) >> 3) as u16) << 8) + slice[7] as u16,
+        ttl:        slice[8],
+        protocol:   slice[9],
+        checksum:   ((slice[10] as u16) << 8) + slice[11] as u16,
+        source:         [slice[12], slice[13], slice[14], slice[15]],
+        destination:    [slice[16], slice[17], slice[18], slice[19]],
+        options:        options,
     }
 }
 
 struct Message {
-    header: [u8; 24],
+    header: IPv4Header,
     body: IcmpMessage
 }
 
-struct IcmpMessage{
+struct IPv4Header {
+    version: u8,
+    ihl: u8,
+    dscp: u8,
+    ecn: u8,
+    length: u16,
+    id: u16,
+    flags: u8,
+    offset: u16,
+    ttl: u8,
+    protocol: u8,
+    checksum: u16,
+    source: [u8; 4],
+    destination: [u8; 4],
+    options: Option<[u8; 4]>
+}
+
+struct IcmpMessage {
     icmp_type: u8,
     icmp_code: u8,
     checksum: u16,
@@ -114,11 +89,11 @@ impl fmt::Display for IcmpMessage {
 
 impl fmt::Display for Message {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        let source = self.header.get_source_ip();
-        let dest = self.header.get_destination_ip();
+        let source = self.header.source;
+        let dest = self.header.destination;
         return write!(f, "Version: {}\nId: {}\nSource: {}.{}.{}.{}\nDestination: {}.{}.{}.{}\nBody:\n{}",
-                      self.header.get_version(),
-                      self.header.get_identification(),
+                      self.header.version,
+                      self.header.id,
                       source[0], source[1], source[2], source[3],
                       dest[0], dest[1], dest[2], dest[3],
                       self.body
@@ -228,12 +203,13 @@ fn convert_data(data: &mut[u8]) -> Option<Message> {
 
     let mut header: [u8; 24] = [0;24];
     let result = (&mut header[..]).write(&data[..23]);
+    let ipv4_header = slice_to_ipv4_header(&mut header);
     return match result {
         Ok(_) => {
-            if header.get_ihl() > 5 {
+            if ipv4_header.ihl > 5 {
                 return match converter(&data[24..]){
                     IResult::Done(_, output) => map_option(output,|out| Message {
-                        header: header,
+                        header: slice_to_ipv4_header(&header),
                         body: out,
                     }),
                     IResult::Error(_) => None,
@@ -242,7 +218,7 @@ fn convert_data(data: &mut[u8]) -> Option<Message> {
             } else {
                 return match converter(&data[20..]){
                     IResult::Done(_, output) => map_option(output,|out| Message {
-                        header: header,
+                        header: slice_to_ipv4_header(&header),
                         body: out,
                     }),
                     IResult::Error(_) => None,
