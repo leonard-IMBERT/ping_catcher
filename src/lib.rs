@@ -17,13 +17,6 @@ use nom::{IResult, Needed};
 
 const IPPROTO_ICMP: i32 = 1;
 
-struct Word32 {
-    al: u8,
-    be: u8,
-    ga: u8,
-    de: u8
-}
-
 trait IPv4Message {
     fn get_version(&self) -> u8;
     fn get_ihl(&self) -> u8;
@@ -36,9 +29,9 @@ trait IPv4Message {
     fn get_ttl(&self) -> u8;
     fn get_protocol(&self) -> u8;
     fn get_checksum(&self) -> u16;
-    fn get_source_ip(&self) -> Word32;
-    fn get_destination_ip(&self) -> Word32;
-    fn get_option(&self) -> Option<Word32>;
+    fn get_source_ip(&self) -> [u8; 4];
+    fn get_destination_ip(&self) -> [u8; 4];
+    fn get_option(&self) -> Option<[u8; 4]>;
 }
 
 impl IPv4Message for [u8; 24] {
@@ -75,32 +68,17 @@ impl IPv4Message for [u8; 24] {
     fn get_checksum(&self) -> u16 {
         return ((self[10] as u16) << 8) + self[11] as u16;
     }
-    fn get_source_ip(&self) -> Word32 {
-        return Word32 {
-            al: self[12],
-            be: self[13],
-            ga: self[14],
-            de: self[15]
-        };
+    fn get_source_ip(&self) -> [u8; 4] {
+        return [self[12], self[13], self[14], self[15]]
     }
-    fn get_destination_ip(&self) -> Word32 {
-        return Word32 {
-            al: self[16],
-            be: self[17],
-            ga: self[18],
-            de: self[19]
-        };
+    fn get_destination_ip(&self) -> [u8; 4] {
+        return [self[16], self[17], self[18], self[19]]
     }
-    fn get_option(&self) -> Option<Word32> {
+    fn get_option(&self) -> Option<[u8; 4]> {
         if self.get_ihl() <= 5 {
             return None;
         } else {
-            return Some(Word32 {
-                al: self[20],
-                be: self[21],
-                ga: self[22],
-                de: self[23]
-            })
+            return Some([self[20], self[21], self[22], self[23]])
         }
     }
 }
@@ -114,57 +92,49 @@ struct IcmpMessage{
     icmp_type: u8,
     icmp_code: u8,
     checksum: u16,
-    header_content: Word32,
-    data1: Word32,
-    data2: Word32,
-    data3: Word32,
-}
-
-impl fmt::Display for Word32 {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        return write!(f,"{} {} {} {}", self.al, self.be, self.ga, self.de);
-    }
+    header_content: [u8; 4],
+    data1: [u8; 4],
+    data2: [u8; 4],
+    data3: [u8; 4],
 }
 
 impl fmt::Display for IcmpMessage {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        return write!(f, "type: {}\ncode: {}\nchecksum: {}\nheader: {}\ndata:\n{}\n{}\n{}\n",
+        return write!(f, "type: {}\ncode: {}\nchecksum: {}\nheader: {} {} {} {}\ndata:\n{} {} {} {}\n{} {} {} {}\n{} {} {} {}\n",
                self.icmp_type,
                self.icmp_code,
                self.checksum,
-               self.header_content,
-               self.data1,
-               self.data2,
-               self.data3);
+               self.header_content[0],self.header_content[1],self.header_content[2],self.header_content[3],
+               self.data1[0],self.data1[1],self.data1[2],self.data1[3],
+               self.data2[0],self.data2[1],self.data2[2],self.data2[3],
+               self.data3[0],self.data3[1],self.data3[2],self.data3[3]
+               );
     }
 }
 
 impl fmt::Display for Message {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        return write!(f, "Version: {}\nId: {}\nSource: {}\nDestination: {}\nBody:\n{}",
+        let source = self.header.get_source_ip();
+        let dest = self.header.get_destination_ip();
+        return write!(f, "Version: {}\nId: {}\nSource: {}.{}.{}.{}\nDestination: {}.{}.{}.{}\nBody:\n{}",
                       self.header.get_version(),
                       self.header.get_identification(),
-                      self.header.get_source_ip(),
-                      self.header.get_destination_ip(),
+                      source[0], source[1], source[2], source[3],
+                      dest[0], dest[1], dest[2], dest[3],
                       self.body
                       );
     }
 }
 
-fn u8_to_word32(u: &[u8]) -> Option<Word32> {
-    named!(scribe(&[u8]) -> Option<Word32>,
+fn u8_to_word32(u: &[u8]) -> Option<[u8; 4]> {
+    named!(scribe(&[u8]) -> Option<[u8; 4]>,
     chain!(
             fi: take!(8)    ~
             se: take!(8)    ~
             th: take!(8)    ~
             fo: take!(8)    ,
             || {match (u8_to_u8(fi), u8_to_u8(se), u8_to_u8(th), u8_to_u8(fo)){
-                (Some(a), Some(b), Some(c), Some(d)) => Some(Word32 {
-                    al: a,
-                    be: b,
-                    ga: c,
-                    de: d
-                }),
+                (Some(a), Some(b), Some(c), Some(d)) => Some([a,b,c,d]),
                 _ => None,
             }}
             ));
