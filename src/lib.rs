@@ -46,6 +46,7 @@ struct Message {
     body: IcmpMessage
 }
 
+#[allow(dead_code)]
 struct IPv4Header {
     version: u8,
     ihl: u8,
@@ -63,6 +64,7 @@ struct IPv4Header {
     options: Option<[u8; 4]>
 }
 
+#[allow(dead_code)]
 struct IcmpMessage {
     icmp_type: u8,
     icmp_code: u8,
