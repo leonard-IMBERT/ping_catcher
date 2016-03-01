@@ -13,7 +13,7 @@ use std::io;
 use std::io::Write;
 use std::fmt;
 
-use nom::{IResult, Needed};
+use nom::{IResult, be_u8, be_u16};
 
 const IPPROTO_ICMP: i32 = 1;
 
@@ -41,13 +41,13 @@ fn slice_to_ipv4_header(&slice: &[u8; 24]) -> IPv4Header {
     }
 }
 
-struct Message {
+pub struct Message {
     header: IPv4Header,
     body: IcmpMessage
 }
 
 #[allow(dead_code)]
-struct IPv4Header {
+pub struct IPv4Header {
     version: u8,
     ihl: u8,
     dscp: u8,
@@ -65,7 +65,7 @@ struct IPv4Header {
 }
 
 #[allow(dead_code)]
-struct IcmpMessage {
+pub struct IcmpMessage {
     icmp_type: u8,
     icmp_code: u8,
     checksum: u16,
@@ -103,56 +103,11 @@ impl fmt::Display for Message {
     }
 }
 
-fn u8_to_word32(u: &[u8]) -> Option<[u8; 4]> {
-    named!(scribe(&[u8]) -> Option<[u8; 4]>,
-    chain!(
-            fi: take!(8)    ~
-            se: take!(8)    ~
-            th: take!(8)    ~
-            fo: take!(8)    ,
-            || {match (u8_to_u8(fi), u8_to_u8(se), u8_to_u8(th), u8_to_u8(fo)){
-                (Some(a), Some(b), Some(c), Some(d)) => Some([a,b,c,d]),
-                _ => None,
-            }}
-            ));
-    return match scribe(u){
-        IResult::Done(_, output) => output,
-        IResult::Error(_) => {
-            println!("Error when parsing");
-            return None;
-        },
-        IResult::Incomplete(need) => {
-            match need {
-                Needed::Unknown => println!("Fuuuuuu"),
-                Needed::Size(si) => println!("Missing: {}", si)
-            }
-            return None;
-        }
-    };
-}
-
-fn u8_point(point: &u8) -> u8 {
-    let &ret = point;
-    return ret;
-}
-
-fn u8_to_u8(table: &[u8]) -> Option<u8> {
-    return map_option(table.iter().next(), u8_point);
-}
-
-fn u8_to_u16(table: &[u8]) -> Option<u16> {
-    let mut iter = table.iter();
-
-    fn as_u16(ei: &u8) -> u16 {
-        let &si = ei;
-        return si as u16;
-    }
-
-    let left_op = map_option(iter.next(), as_u16);
-    let right_op = map_option(iter.next(), as_u16);
-    match (left_op, right_op) {
-        (Some(left), Some(right)) => return Some((left << 8) +right),
-        _ => return None,
+fn be_array_4(slice: &[u8]) -> Option<[u8; 4]> {
+    let mut it = slice.iter();
+    return match (it.next(), it.next(), it.next(), it.next()) {
+        (Some(&i_0), Some(&i_1), Some(&i_2), Some(&i_3)) => Some([i_0, i_1, i_2, i_3]),
+        _ => None,
     }
 }
 
@@ -167,40 +122,43 @@ fn convert_data(data: &mut[u8]) -> Option<Message> {
     named!(
         converter(&[u8]) -> Option<IcmpMessage>,
         chain!(
-            icmp_t: take!(8)            ~
-            icmp_c: take!(8)            ~
-            checks: take!(16)           ~
-            header_cont: take!(32)      ~
-            body1: take!(32)            ~
-            body2: take!(32)            ~
-            body3: take!(32)            ,
-            || {match(
-                    u8_to_u8(icmp_t),
-                    u8_to_u8(icmp_c),
-                    u8_to_u16(checks),
-                    u8_to_word32(header_cont),
-                    u8_to_word32(body1),
-                    u8_to_word32(body2),
-                    u8_to_word32(body3),
-                ){(
-                    Some(ty),
-                    Some(co),
-                    Some(ch),
-                    Some(he),
-                    Some(b1),
-                    Some(b2),
-                    Some(b3)
-                ) => Some(IcmpMessage{
-                    icmp_type:          ty,
-                    icmp_code:          co,
-                    checksum:           ch,
-                    header_content:     he,
-                    data1:              b1,
-                    data2:              b2,
-                    data3:              b3,
-                }),
-                _ => None,
-            }}
+            icmp_t: take!(1)                ~
+            icmp_c: take!(1)                ~
+            checks: take!(2)                ~
+            header_cont: take!(4)           ~
+            body1: take!(4)                 ~
+            body2: take!(4)                 ~
+            body3: take!(4)                 ,
+            || {
+                match (
+                    be_u8(icmp_t),
+                    be_u8(icmp_c),
+                    be_u16(checks),
+                    be_array_4(header_cont),
+                    be_array_4(body1),
+                    be_array_5(body2),
+                    be_array_4(body3)
+                ) {
+                    (
+                        IResult::Done(_, ty),
+                        IResult::Done(_, co),
+                        IResult::Done(_, ch),
+                        Some(he),
+                        Some(b1),
+                        Some(b2),
+                        Some(b3)
+                    ) => Some(IcmpMessage{
+                        icmp_type:          ty,
+                        icmp_code:          co,
+                        checksum:           ch,
+                        header_content:     he,
+                        data1:              b1,
+                        data2:              b2,
+                        data3:              b3,
+                    }),
+                    _ => None,
+                }
+            }
     ));
 
     let mut header: [u8; 24] = [0;24];
@@ -232,23 +190,29 @@ fn convert_data(data: &mut[u8]) -> Option<Message> {
     }
 }
 
-pub fn listen_during(dur: Duration) -> io::Result<bool> {
-    let mut data_empt: [u8; 4096] = [0; 4096];
-    let begin = time::get_time();
-    let sock = try!(Socket::new(AF_INET, SOCK_RAW, IPPROTO_ICMP));
-    while time::get_time() < begin + dur {
-        match listen(&mut data_empt[..], &sock) {
-            Ok(data) => match convert_data(data) {
-                Some(d) => println!("{}", d),
-                None => println!("Error during parsing\n"),
-            },
-            Err(err) => println!("{}", err),
-        }
-    }
-    return Ok(true);
+pub fn listen_during<'a>(dur: Duration) -> io::Result<Vec<Message>> {
+    return listen_during_and(dur, |m| m);
 }
 
-pub fn listen<'a>(container: &'a mut [u8], sock: &Socket) -> io::Result<&'a mut [u8]> {
+pub fn listen_during_and<'a, F, B>(dur: Duration, callback: F) -> io::Result<Vec<B>> where F: Fn(Message) -> B {
+    let mut data_empt: [u8; 4096] = [0; 4096];
+    let mut result: Vec<B> = Vec::new();
+    let begin = time::get_time();
+    let sock = try!(Socket::new(AF_INET, SOCK_RAW, IPPROTO_ICMP));
+
+    while time::get_time() < begin + dur {
+        match listen(&mut data_empt[..], &sock) {
+            Ok(opt) => match opt {
+                Some(data) => result.push(callback(data)),
+                None => println!("Error during parsing"),
+            },
+            Err(_) => (),
+        }
+    }
+    return Ok(result);
+}
+
+pub fn listen<'a>(container: &'a mut [u8], sock: &Socket) -> io::Result<Option<Message>> {
     try!(sock.setsockopt(IPPROTO_IP, IP_TTL, 255));
     try!(sock.setsockopt(SOL_SOCKET, SO_RCVTIMEO, compute_timeout(Duration::seconds(3))));
     match sock.recvfrom_into(container, 0) {
@@ -256,7 +220,7 @@ pub fn listen<'a>(container: &'a mut [u8], sock: &Socket) -> io::Result<&'a mut 
             return Err(err);
         },
         Ok((_,_)) => {
-            return Ok(container);
+            return Ok(convert_data(container));
         }
     }
 }
